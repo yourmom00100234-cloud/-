@@ -1,0 +1,282 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>슬라이딩 라인 테트리스</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; user-select: none; }
+    body {
+      background-color: #121216;
+      color: #fff;
+      font-family: 'Pretendard', sans-serif;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      min-height: 100vh;
+      overflow: hidden;
+    }
+    #header {
+      display: flex;
+      gap: 30px;
+      font-size: 1.2rem;
+      font-weight: bold;
+      margin-bottom: 15px;
+    }
+    canvas {
+      background: #1a1a24;
+      border: 3px solid #3b3b4f;
+      border-radius: 12px;
+      box-shadow: 0 10px 30px rgba(0,0,0,0.6);
+      touch-action: none;
+    }
+    #info {
+      margin-top: 10px;
+      font-size: 0.9rem;
+      color: #aaa;
+    }
+  </style>
+</head>
+<body>
+
+  <div id="header">
+    <div>점수: <span id="score">0</span></div>
+    <div>최고 점수: <span id="highScore">0</span></div>
+  </div>
+
+  <canvas id="gameCanvas" width="360" height="600"></canvas>
+  <div id="info">화면에 선을 그어 떨어지는 블록을 유도하세요! (한 줄 완성 시 삭제)</div>
+
+  <script>
+    const canvas = document.getElementById('gameCanvas');
+    const ctx = canvas.getContext('2d');
+    const scoreEl = document.getElementById('score');
+    const highScoreEl = document.getElementById('highScore');
+
+    let score = 0;
+    let highScore = localStorage.getItem('lineTetrisHighScore') || 0;
+    highScoreEl.textContent = highScore;
+
+    // 격자 설정 (10열 x 20행)
+    const COLS = 10;
+    const ROWS = 20;
+    const BLOCK_SIZE = 30; // 10 * 30 = 300px 너비, 20 * 30 = 600px 높이
+    canvas.width = COLS * BLOCK_SIZE;
+    canvas.height = ROWS * BLOCK_SIZE;
+
+    // 바닥 격자 판 (0은 빈칸, 색상 코드는 쌓인 블록)
+    let grid = Array(ROWS).fill(null).map(() => Array(COLS).fill(0));
+
+    // 선 그리기 관련
+    let lines = [];
+    let isDrawing = false;
+    let currentLine = null;
+
+    // 현재 떨어지고 있는 블록
+    let currentBlock = null;
+
+    const COLORS = ['#ff5555', '#55ffff', '#55ff55', '#ff55ff', '#ffff55', '#ffb86d', '#8be9fd'];
+
+    function spawnBlock() {
+      currentBlock = {
+        x: canvas.width / 2 - 15,
+        y: 0,
+        vx: 0,
+        vy: 1.5,
+        size: BLOCK_SIZE - 2,
+        color: COLORS[Math.floor(Math.random() * COLORS.length)]
+      };
+    }
+
+    spawnBlock();
+
+    // 마우스/터치로 선(경사로) 그리기
+    function getPos(e) {
+      const rect = canvas.getBoundingClientRect();
+      const clientX = e.touches ? e.touches[0].clientX : e.clientX;
+      const clientY = e.touches ? e.touches[0].clientY : e.clientY;
+      return { x: clientX - rect.left, y: clientY - rect.top };
+    }
+
+    canvas.addEventListener('pointerdown', (e) => {
+      isDrawing = true;
+      const pos = getPos(e);
+      currentLine = { x1: pos.x, y1: pos.y, x2: pos.x, y2: pos.y, life: 120 };
+    });
+
+    canvas.addEventListener('pointermove', (e) => {
+      if (!isDrawing || !currentLine) return;
+      const pos = getPos(e);
+      currentLine.x2 = pos.x;
+      currentLine.y2 = pos.y;
+    });
+
+    canvas.addEventListener('pointerup', () => {
+      if (currentLine && Math.hypot(currentLine.x2 - currentLine.x1, currentLine.y2 - currentLine.y1) > 10) {
+        lines.push(currentLine);
+      }
+      isDrawing = false;
+      currentLine = null;
+    });
+
+    // 한 줄 완성 체크 및 삭제
+    function checkLines() {
+      for (let r = ROWS - 1; r >= 0; r--) {
+        if (grid[r].every(cell => cell !== 0)) {
+          grid.splice(r, 1); // 해당 줄 삭제
+          grid.unshift(Array(COLS).fill(0)); // 맨 위에 빈 줄 추가
+          score += 100;
+          scoreEl.textContent = score;
+          if (score > highScore) {
+            highScore = score;
+            highScoreEl.textContent = highScore;
+            localStorage.setItem('lineTetrisHighScore', highScore);
+          }
+          r++; // 같은 줄 다시 검사
+        }
+      }
+    }
+
+    // 물리 및 게임 로직 업데이트
+    function update() {
+      // 선 수명 감소
+      lines.forEach((l, idx) => {
+        l.life--;
+        if (l.life <= 0) lines.splice(idx, 1);
+      });
+
+      if (currentBlock) {
+        currentBlock.vy += 0.12; // 중력
+        currentBlock.x += currentBlock.vx;
+        currentBlock.y += currentBlock.vy;
+
+        // 선과 충돌 시 미끄러짐
+        lines.forEach(l => {
+          const dx = l.x2 - l.x1;
+          const dy = l.y2 - l.y1;
+          const len = Math.hypot(dx, dy);
+          if (len === 0) return;
+
+          const u = ((currentBlock.x - l.x1) * dx + (currentBlock.y - l.y1) * dy) / (len * len);
+          if (u >= 0 && u <= 1) {
+            const ix = l.x1 + u * dx;
+            const iy = l.y1 + u * dy;
+            const dist = Math.hypot(currentBlock.x - ix, currentBlock.y - iy);
+
+            if (dist < BLOCK_SIZE / 2) {
+              // 선 방향으로 미끄러지게 속도 벡터 조절
+              const nx = -dy / len;
+              const ny = dx / len;
+              currentBlock.vx = (dx / len) * 2.5;
+              currentBlock.vy = (dy / len) * 2.5;
+              currentBlock.x = ix + nx * (BLOCK_SIZE / 2);
+              currentBlock.y = iy + ny * (BLOCK_SIZE / 2);
+            }
+          }
+        });
+
+        // 좌우 벽 충돌
+        if (currentBlock.x < 0) { currentBlock.x = 0; currentBlock.vx *= -0.5; }
+        if (currentBlock.x > canvas.width - BLOCK_SIZE) { currentBlock.x = canvas.width - BLOCK_SIZE; currentBlock.vx *= -0.5; }
+
+        // 바닥 또는 쌓인 블록과 충돌 체크
+        let targetRow = Math.floor((currentBlock.y + BLOCK_SIZE) / BLOCK_SIZE);
+        let targetCol = Math.floor((currentBlock.x + BLOCK_SIZE / 2) / BLOCK_SIZE);
+
+        let hit = false;
+        if (currentBlock.y >= canvas.height - BLOCK_SIZE) {
+          hit = true;
+          currentBlock.y = canvas.height - BLOCK_SIZE;
+        } else if (targetRow >= 0 && targetRow < ROWS && targetCol >= 0 && targetCol < COLS) {
+          if (grid[targetRow][targetCol] !== 0) {
+            hit = true;
+            targetRow--; // 바로 위칸에 안착
+          }
+        }
+
+        if (hit) {
+          // 격자에 고정
+          let finalR = Math.max(0, Math.min(ROWS - 1, Math.floor(currentBlock.y / BLOCK_SIZE)));
+          let finalC = Math.max(0, Math.min(COLS - 1, Math.floor(currentBlock.x / BLOCK_SIZE)));
+          
+          grid[finalR][finalC] = currentBlock.color;
+          checkLines();
+          spawnBlock();
+
+          // 게임 오버 체크 (맨 윗줄이 찼을 때)
+          if (grid[0].some(cell => cell !== 0)) {
+            alert('게임 오버! 점수: ' + score);
+            grid = Array(ROWS).fill(null).map(() => Array(COLS).fill(0));
+            score = 0;
+            scoreEl.textContent = score;
+          }
+        }
+      }
+    }
+
+    // 화면 렌더링
+    function draw() {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+      // 격자선 그리기 (은은하게)
+      ctx.strokeStyle = '#232333';
+      ctx.lineWidth = 1;
+      for (let r = 0; r < ROWS; r++) {
+        for (let c = 0; c < COLS; c++) {
+          ctx.strokeRect(c * BLOCK_SIZE, r * BLOCK_SIZE, BLOCK_SIZE, BLOCK_SIZE);
+        }
+      }
+
+      // 이미 쌓인 블록들 그리기
+      for (let r = 0; r < ROWS; r++) {
+        for (let c = 0; c < COLS; c++) {
+          if (grid[r][c] !== 0) {
+            ctx.fillStyle = grid[r][c];
+            ctx.fillRect(c * BLOCK_SIZE + 1, r * BLOCK_SIZE + 1, BLOCK_SIZE - 2, BLOCK_SIZE - 2);
+          }
+        }
+      }
+
+      // 현재 떨어지는 블록 그리기
+      if (currentBlock) {
+        ctx.fillStyle = currentBlock.color;
+        ctx.fillRect(currentBlock.x, currentBlock.y, BLOCK_SIZE - 2, BLOCK_SIZE - 2);
+        ctx.strokeStyle = '#fff';
+        ctx.lineWidth = 2;
+        ctx.strokeRect(currentBlock.x, currentBlock.y, BLOCK_SIZE - 2, BLOCK_SIZE - 2);
+      }
+
+      // 유저가 그린 선들 그리기
+      lines.forEach(l => {
+        ctx.strokeStyle = `rgba(255, 255, 255, ${l.life / 120})`;
+        ctx.lineWidth = 5;
+        ctx.lineCap = 'round';
+        ctx.beginPath();
+        ctx.moveTo(l.x1, l.y1);
+        ctx.lineTo(l.x2, l.y2);
+        ctx.stroke();
+      });
+
+      // 드래그 중인 선 그리기
+      if (currentLine) {
+        ctx.strokeStyle = '#ff79c6';
+        ctx.lineWidth = 5;
+        ctx.lineCap = 'round';
+        ctx.beginPath();
+        ctx.moveTo(currentLine.x1, currentLine.y1);
+        ctx.lineTo(currentLine.x2, currentLine.y2);
+        ctx.stroke();
+      }
+    }
+
+    function loop() {
+      update();
+      draw();
+      requestAnimationFrame(loop);
+    }
+
+    loop();
+  </script>
+</body>
+</html>
